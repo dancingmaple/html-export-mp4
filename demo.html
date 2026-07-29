@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>video-exporter.js · 把任意 Canvas 动画导出成 MP4 的工具库</title>
+<style>
+:root{
+  --bg:#0e1014; --bg2:#14171d; --panel:#171b22; --panel2:#1d222b;
+  --line:#2a313c; --line2:#39414e;
+  --ink:#e9e6dd; --mut:#9aa3b0; --dim:#69727f;
+  --amber:#f4b740; --teal:#34d3c0; --rose:#ff6b81; --violet:#9d8cff;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --disp:"Space Grotesk","Segoe UI",system-ui,sans-serif;
+  --sans:"Inter","Segoe UI",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+  background-image:
+    radial-gradient(900px 520px at 88% -8%, rgba(244,183,64,.10), transparent 60%),
+    radial-gradient(820px 520px at 6% 4%, rgba(52,211,192,.09), transparent 58%),
+    radial-gradient(700px 700px at 50% 120%, rgba(157,140,255,.07), transparent 60%);}
+/* 胶片齿孔侧装饰 */
+body::before,body::after{content:"";position:fixed;top:0;bottom:0;width:26px;z-index:1;pointer-events:none;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 14px, rgba(255,255,255,.05) 14px 26px),
+    linear-gradient(90deg, rgba(0,0,0,.5), transparent);
+  opacity:.5}
+body::before{left:0}body::after{right:0;transform:scaleX(-1)}
+/* 噪点 */
+.noise{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.04;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.wrap{position:relative;z-index:2;max-width:1080px;margin:0 auto;padding:0 40px}
+@media(max-width:760px){.wrap{padding:0 22px}body::before,body::after{display:none}}
+
+/* 顶栏 */
+.top{display:flex;align-items:center;gap:14px;padding:22px 0 8px;font-family:var(--mono);font-size:12px;color:var(--mut);letter-spacing:.5px}
+.top .dot{width:9px;height:9px;border-radius:50%;background:var(--teal);box-shadow:0 0 12px var(--teal);animation:blink 1.6s infinite}
+@keyframes blink{50%{opacity:.25}}
+.top .tc{margin-left:auto;color:var(--dim)}
+
+/* hero */
+.hero{padding:34px 0 26px;border-bottom:1px solid var(--line)}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:3px;color:var(--amber);text-transform:uppercase;margin:0 0 14px}
+.kicker b{color:var(--teal)}
+h1{font-family:var(--disp);font-weight:700;font-size:clamp(38px,7.4vw,82px);line-height:.98;margin:0;letter-spacing:-1.5px}
+h1 .fn{color:var(--amber);font-family:var(--mono);font-weight:700}
+h1 .ext{color:var(--teal)}
+.lede{max-width:680px;margin:20px 0 0;color:var(--mut);font-size:17px}
+.lede b{color:var(--ink)}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.pill{font-family:var(--mono);font-size:11.5px;padding:6px 12px;border:1px solid var(--line2);border-radius:999px;color:var(--mut);background:rgba(255,255,255,.02)}
+.pill.am{color:var(--amber);border-color:rgba(244,183,64,.4)}
+.pill.te{color:var(--teal);border-color:rgba(52,211,192,.4)}
+
+/* 章节 */
+section{padding:46px 0;border-bottom:1px solid var(--line)}
+.sec-h{display:flex;align-items:baseline;gap:14px;margin:0 0 6px}
+.sec-no{font-family:var(--mono);font-size:13px;color:var(--amber);letter-spacing:1px}
+.sec-h h2{font-family:var(--disp);font-weight:700;font-size:clamp(24px,4vw,38px);margin:0;letter-spacing:-.5px}
+.sec-sub{color:var(--dim);font-family:var(--mono);font-size:12.5px;margin:0 0 22px}
+
+/* reveal */
+.rv{opacity:0;transform:translateY(22px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
+.rv.in{opacity:1;transform:none}
+
+/* 代码块 */
+.codewrap{position:relative;border:1px solid var(--line);border-radius:14px;background:#0b0d11;overflow:hidden;margin:14px 0}
+.codebar{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--panel);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--mut)}
+.codebar .nm{color:var(--teal)}
+.codebar .sz{color:var(--dim);margin-left:auto}
+.copybtn{font-family:var(--mono);font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--ink);cursor:pointer;transition:.16s}
+.copybtn:hover{border-color:var(--amber);color:var(--amber);transform:translateY(-1px)}
+.copybtn.ok{border-color:var(--teal);color:var(--teal)}
+pre{margin:0;padding:16px 18px;overflow:auto;max-height:560px;font-family:var(--mono);font-size:12.5px;line-height:1.7;
+  counter-reset:ln;tab-size:2}
+pre code{display:block}
+pre .ln{display:block;white-space:pre}
+pre .ln::before{counter-increment:ln;content:counter(ln);display:inline-block;width:2.4em;margin-right:1.1em;
+  text-align:right;color:#3a424e;user-select:none}
+.tok-com{color:#5b6675;font-style:italic}
+.tok-str{color:#9ad28a}
+.tok-key{color:var(--rose)}
+.tok-num{color:var(--amber)}
+.tok-fn{color:#7fb4ff}
+
+/* API 表 */
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;border-bottom:1px solid var(--line2)}
+td code,k{font-family:var(--mono);font-size:12.5px;color:var(--amber);background:rgba(244,183,64,.08);padding:1px 6px;border-radius:5px}
+td .req{color:var(--rose);font-family:var(--mono);font-size:10px;margin-left:6px}
+td .def{color:var(--dim);font-family:var(--mono);font-size:11px}
+
+/* 卡片网格（踩坑/特性） */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.card{border:1px solid var(--line);border-radius:14px;padding:16px 17px;background:linear-gradient(180deg,var(--panel),var(--bg2));transition:.2s;position:relative;overflow:hidden}
+.card:hover{transform:translateY(-3px);border-color:var(--line2);box-shadow:0 14px 30px rgba(0,0,0,.4)}
+.card .ic{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--teal);margin-bottom:8px}
+.card.am .ic{color:var(--amber)}.card.ro .ic{color:var(--rose)}.card.vi .ic{color:var(--violet)}
+.card h4{margin:0 0 6px;font-family:var(--disp);font-size:15.5px;font-weight:600}
+.card p{margin:0;color:var(--mut);font-size:13px}
+
+/* demo */
+.demo{display:grid;grid-template-columns:300px 1fr;gap:22px;align-items:start}
+@media(max-width:760px){.demo{grid-template-columns:1fr}}
+.stage{border:1px solid var(--line);border-radius:16px;background:#0b0d11;padding:14px;text-align:center}
+.stage canvas{width:100%;max-width:240px;aspect-ratio:9/16;border-radius:10px;display:block;margin:0 auto;background:#000;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.stage .cap{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:10px}
+.panel{border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:18px}
+.row{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:13px;color:var(--mut)}
+.row label{min-width:62px;font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+.row select,.row input{font:inherit;font-size:13px;padding:7px 9px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--ink)}
+.btns{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.btn{font-family:var(--disp);font-weight:600;font-size:14px;padding:11px 18px;border-radius:11px;border:1px solid var(--line2);background:var(--panel2);color:var(--ink);cursor:pointer;transition:.16s}
+.btn:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(0,0,0,.4)}
+.btn.go{background:linear-gradient(180deg,#f7c45a,var(--amber));color:#1a1305;border-color:var(--amber)}
+.btn.go:hover{box-shadow:0 8px 22px rgba(244,183,64,.3)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.progwrap{display:flex;align-items:center;gap:14px;margin-top:18px}
+.ring{width:62px;height:62px;flex:none}
+.ring svg{transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:6;stroke-linecap:round}
+.ring .bg{stroke:var(--line)}.ring .fg{stroke:var(--teal);transition:stroke-dashoffset .15s}
+.ring .pct{font-family:var(--mono);font-size:13px;fill:var(--ink)}
+.pstat{font-family:var(--mono);font-size:12px;color:var(--mut);line-height:1.5}
+.pstat b{color:var(--teal)}
+.pstat .err{color:var(--rose)}
+.foot{padding:40px 0 70px;color:var(--dim);font-family:var(--mono);font-size:12px;text-align:center}
+.foot a{color:var(--amber);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="noise"></div>
+
+<!-- ====== 库源码：单一数据源，type=text/plain 不执行，供展示+执行共用 ====== -->
+<script type="text/plain" id="lib-src">
+/* video-exporter.js — 把任意 Canvas 动画导出为 MP4/WebM 的零依赖工具库 (UMD)
+   核心抽象：你提供 render(ctx, t) 回调，库按 fps 逐帧调用并编码。
+   双引擎：WebCodecs 逐帧离线（精确/不占实时）+ MediaRecorder 实时兜底。 */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else if (typeof define === 'function' && define.amd) define([], function () { return api; });
+  else { root.VEX = api; root.exportVideo = api.exportVideo; root.VideoExporter = api.VideoExporter; }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  "use strict";
+
+  var MUXER_CDNS = [
+    'https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js',
+    'https://unpkg.com/mp4-muxer@5.1.3/build/mp4-muxer.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/mp4-muxer/5.1.3/mp4-muxer.min.js',
+    'https://cdn.bootcdn.net/ajax/libs/mp4-muxer/5.1.3/mp4-muxer.min.js'
+  ];
+  var _muxerP = null;
+  function loadMp4Muxer(urls) {
+    if (_muxerP) return _muxerP;
+    urls = urls || MUXER_CDNS;
+    return (_muxerP = (async function () {
+      if (typeof Mp4Muxer !== 'undefined') return Mp4Muxer;
+      for (var i = 0; i < urls.length; i++) {
+        try {
+          await new Promise(function (res, rej) {
+            var s = document.createElement('script');
+            s.src = urls[i]; s.onload = res; s.onerror = rej; document.head.appendChild(s);
+          });
+          if (typeof Mp4Muxer !== 'undefined') return Mp4Muxer;
+        } catch (e) { /* 试下一个 CDN */ }
+      }
+      _muxerP = null; // 失败不缓存，允许重试
+      throw new Error('mp4-muxer 加载失败（全部 CDN 不可达）');
+    })());
+  }
+
+  function isWebCodecsSupported() {
+    return typeof window !== 'undefined' && 'VideoEncoder' in window && 'VideoFrame' in window;
+  }
+  function pickRecorderMime() {
+    var c = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9',
+             'video/webm;codecs=vp8', 'video/webm'];
+    for (var i = 0; i < c.length; i++) if (MediaRecorder.isTypeSupported(c[i])) return c[i];
+    return '';
+  }
+  function even(v) { return Math.max(2, v & ~1); }            // H.264 要求偶数宽高
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function defaultBitrate(w, h, fps) { return clamp(Math.round(w * h * fps * 0.08), 2e6, 24e6); }
+  // 按分辨率/帧率选 H.264 level，避免 1080p 误用低 level 导致编码失败
+  function pickAvcCodec(w, h, fps, override) {
+    if (override) return override;
+    var px = w * h;
+    if (px > 2073600) return fps > 30 ? 'avc1.420034' : 'avc1.420033'; // 4K: 5.2 / 5.1
+    if (px > 921600)  return fps > 30 ? 'avc1.42002a' : 'avc1.420028'; // 1080p: 4.2 / 4.0
+    return 'avc1.420028';                                             // 720p 及以下: 4.0
+  }
+  function downloadBlob(blob, name) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
+  }
+
+  function VideoExporter(opts) {
+    opts = opts || {};
+    if (typeof opts.render !== 'function') throw new Error('exportVideo: 缺少 render(ctx, t) 回调');
+    if (!(opts.width > 0) || !(opts.height > 0)) throw new Error('exportVideo: width/height 必须为正数');
+    if (!(opts.fps > 0)) throw new Error('exportVideo: fps 必须为正数');
+    if (!(opts.duration > 0)) throw new Error('exportVideo: duration 必须为正数(秒)');
+    this.o = {
+      width: even(opts.width), height: even(opts.height),
+      fps: opts.fps, duration: opts.duration, render: opts.render,
+      mode: opts.mode || 'auto',                       // 'auto' | 'webcodecs' | 'mediarecorder'
+      bitrate: opts.bitrate || defaultBitrate(even(opts.width), even(opts.height), opts.fps),
+      codec: opts.codec || null, alpha: !!opts.alpha,
+      gop: opts.gop || Math.round((opts.fps || 30) * 2),
+      yieldEvery: opts.yieldEvery == null ? 3 : opts.yieldEvery,
+      filename: opts.filename || 'video-export',
+      download: opts.download !== false,
+      onProgress: opts.onProgress || function () {},
+      onLog: opts.onLog || function () {},
+      signal: opts.signal || null,
+      muxerUrls: opts.muxerUrls || null
+    };
+    this._aborted = false; this._encError = null;
+    var self = this;
+    if (this.o.signal) this.o.signal.addEventListener('abort', function () { self._aborted = true; });
+  }
+  VideoExporter.prototype._log = function (m) { try { this.o.onLog(m); } catch (e) {} };
+  VideoExporter.prototype._progress = function (p, info) { try { this.o.onProgress(clamp(p, 0, 1), info); } catch (e) {} };
+  VideoExporter.prototype._abortErr = function () {
+    var e = new Error('导出已取消'); e.name = 'AbortError'; return e;
+  };
+  VideoExporter.prototype._makeCanvas = function () {
+    var c = document.createElement('canvas');
+    c.width = this.o.width; c.height = this.o.height;
+    return c;
+  };
+
+  VideoExporter.prototype._exportWC = async function (canvas, ctx) {
+    var M = await loadMp4Muxer(this.o.muxerUrls);
+    var o = this.o, self = this;
+    var frames = Math.max(1, Math.ceil(o.duration * o.fps));
+    var muxer = new M.Muxer({
+      target: new M.ArrayBufferTarget(),
+      video: { codec: 'avc', width: canvas.width, height: canvas.height },
+      fastStart: 'in-memory'
+    });
+    var enc = new VideoEncoder({
+      output: function (chunk, meta) { muxer.addVideoChunk(chunk, meta); },
+      error: function (e) { self._encError = e; }
+    });
+    enc.configure({
+      codec: pickAvcCodec(canvas.width, canvas.height, o.fps, o.codec),
+      width: canvas.width, height: canvas.height, bitrate: o.bitrate, framerate: o.fps
+    });
+    for (var f = 0; f < frames; f++) {
+      if (this._aborted) { enc.close(); throw this._abortErr(); }
+      if (this._encError) { enc.close(); throw this._encError; }
+      var t = f / o.fps;
+      try { o.render(ctx, t, f, frames); } catch (e) { this._log('render@' + f + ' ' + e.message); }
+      var fr = new VideoFrame(canvas, {
+        timestamp: Math.round(f * 1e6 / o.fps), duration: Math.round(1e6 / o.fps)
+      });
+      try { enc.encode(fr, { keyFrame: f % o.gop === 0 }); } catch (e) { this._log('encode@' + f + ' ' + e.message); }
+      fr.close();
+      if (f % o.yieldEvery === 0) {
+        this._progress(f / frames, { frame: f, frames: frames, t: t, used: 'webcodecs' });
+        await new Promise(function (r) { setTimeout(r, 0); });
+      }
+    }
+    this._progress(1, { frame: frames, frames: frames, t: o.duration, used: 'webcodecs' });
+    await enc.flush(); muxer.finalize(); enc.close();
+    return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+  };
+
+  VideoExporter.prototype._exportMR = function (canvas, ctx) {
+    var o = this.o, self = this;
+    return new Promise(function (resolve, reject) {
+      var mime = pickRecorderMime();
+      if (!mime) return reject(new Error('无可用 MediaRecorder 编码格式'));
+      var mr;
+      try { mr = new MediaRecorder(canvas.captureStream(o.fps), { mimeType: mime, videoBitsPerSecond: o.bitrate }); }
+      catch (e) { return reject(e); }
+      var chunks = [];
+      mr.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      mr.onerror = function (e) { reject(e.error || new Error('MediaRecorder 错误')); };
+      mr.onstop = function () {
+        if (self._aborted) return reject(self._abortErr());
+        resolve({ blob: new Blob(chunks, { type: mime }), mime: mime });
+      };
+      var wall = performance.now();
+      mr.start(100);
+      (function tick() {
+        var t = (performance.now() - wall) / 1000;
+        if (self._aborted) { if (mr.state === 'recording') mr.stop(); return; }
+        if (t >= o.duration) {
+          try { o.render(ctx, o.duration); } catch (e) {}
+          self._progress(1, { t: o.duration, used: 'mediarecorder' });
+          if (mr.state === 'recording') mr.stop();
+          return;
+        }
+        try { o.render(ctx, t); } catch (e) { self._log('render ' + e.message); }
+        self._progress(t / o.duration, { t: t, used: 'mediarecorder' });
+        requestAnimationFrame(tick);
+      })();
+    });
+  };
+
+  VideoExporter.prototype.export = async function () {
+    var o = this.o;
+    this._aborted = false; this._encError = null;
+    var canvas = this._makeCanvas();
+    var ctx = canvas.getContext('2d', { alpha: !!o.alpha });
+    var blob = null, used = '', mrMime = '';
+
+    var wantWC = o.mode === 'webcodecs' || o.mode === 'auto';
+    var wantMR = o.mode === 'mediarecorder' || o.mode === 'auto';
+
+    if (wantWC) {
+      if (!isWebCodecsSupported()) {
+        if (o.mode === 'webcodecs') throw new Error('当前浏览器不支持 WebCodecs');
+        this._log('WebCodecs 不可用，回退 MediaRecorder');
+      } else {
+        try { blob = await this._exportWC(canvas, ctx); used = 'webcodecs'; }
+        catch (e) {
+          if (this._aborted || e.name === 'AbortError') throw e;       // 用户取消，不再回退
+          this._log('WebCodecs 失败：' + e.message);
+          if (o.mode === 'webcodecs') throw e;                          // 强制 wc 模式则抛
+        }
+      }
+    }
+    if (!blob) {
+      if (!wantMR) throw new Error('导出失败且未启用 MediaRecorder 兜底');
+      var r = await this._exportMR(canvas, ctx);
+      blob = r.blob; mrMime = r.mime; used = 'mediarecorder';
+    }
+
+    var ext = used === 'webcodecs' ? '.mp4' : (/mp4/.test(mrMime) ? '.mp4' : '.webm');
+    var filename = (o.filename || 'video-export') + ext;
+    if (o.download) downloadBlob(blob, filename);
+    return { blob: blob, filename: filename, used: used, duration: o.duration,
+             width: o.width, height: o.height, frames: Math.max(1, Math.ceil(o.duration * o.fps)) };
+  };
+
+  function exportVideo(opts) { return new VideoExporter(opts).export(); }
+
+  return {
+    VideoExporter: VideoExporter, exportVideo: exportVideo,
+    loadMp4Muxer: loadMp4Muxer, pickRecorderMime: pickRecorderMime,
+    isWebCodecsSupported: isWebCodecsSupported, even: even, defaultBitrate: defaultBitrate
+  };
+});
+</script>
+
+<div class="wrap">
+
+  <div class="top"><span class="dot"></span> video-exporter.js <span style="color:var(--dim)">· v1.0 · zero-dep · UMD</span><span class="tc" id="tc">REC 00:00:00</span></div>
+
+  <header class="hero rv">
+    <p class="kicker">CANVAS → <b>MP4</b> · 一个函数搞定</p>
+    <h1><span class="fn">exportVideo</span>(<span style="color:var(--mut)">render</span>)<span class="ext">.mp4</span></h1>
+    <p class="lede">把<b>任意 Canvas 动画</b>导出成高清视频的工具库。你只管画——给一个 <code style="font-family:var(--mono);color:var(--amber)">render(ctx, t)</code> 回调，库负责逐帧编码、双引擎兜底、触发下载。<b>与业务零耦合</b>：海报、数据可视化、粒子、游戏回放，通通适用。</p>
+    <div class="pills">
+      <span class="pill am">WebCodecs 逐帧离线</span>
+      <span class="pill te">MediaRecorder 兜底</span>
+      <span class="pill">mp4-muxer 四 CDN 回退</span>
+      <span class="pill">AbortSignal 取消</span>
+      <span class="pill">无依赖 · UMD/ESM</span>
+      <span class="pill">时长精确 = 帧数/fps</span>
+    </div>
+  </header>
+
+  <!-- 30 秒接入 -->
+  <section class="rv">
+    <div class="sec-h"><span class="sec-no">00:01</span><h2>30 秒接入</h2></div>
+    <p class="sec-sub">// 复制库 → 引入 → 调一个函数。下面这段能直接跑。</p>
+    <div class="codewrap">
+      <div class="codebar"><span>接入示例</span><span class="nm">quickstart.js</span><button class="copybtn" data-copy="qs">复制</button></div>
+<pre><code id="qs"></code></pre>
+    </div>
+  </section>
+
+  <!-- live demo -->
+  <section class="rv">
+    <div class="sec-h"><span class="sec-no">00:02</span><h2>Live Demo · 现在就能导出</h2></div>
+    <p class="sec-sub">// 左边是实时预览（与导出共用同一个 render 函数），右边调参并真导出。点导出，下载一个 mp4 验证。</p>
+    <div class="demo">
+      <div class="stage">
+        <canvas id="prev" width="270" height="480"></canvas>
+        <div class="cap" id="prevCap">PREVIEW · 实时</div>
+      </div>
+      <div class="panel">
+        <div class="row"><label>分辨率</label>
+          <select id="dRes"><option value="540,960">540×960</option><option value="360,640">360×640 (快)</option><option value="720,1280">720×1280</option></select></div>
+        <div class="row"><label>帧率</label>
+          <select id="dFps"><option>24</option><option selected>30</option><option>60</option></select></div>
+        <div class="row"><label>时长</label>
+          <select id="dDur"><option>2</option><option selected>3</option><option>4</option><option>5</option></select><span style="color:var(--dim);font-family:var(--mono);font-size:11px">秒</span></div>
+        <div class="row"><label>引擎</label>
+          <select id="dMode"><option value="auto" selected>auto (优先 WC)</option><option value="webcodecs">仅 WebCodecs</option><option value="mediarecorder">仅 MediaRecorder</option></select></div>
+        <div class="btns">
+          <button class="btn go" id="dGo">● 导出视频</button>
+          <button class="btn" id="dCancel" disabled>取消</button>
+        </div>
+        <div class="progwrap">
+          <div class="ring"><svg width="62" height="62"><circle class="bg" cx="31" cy="31" r="26"/><circle class="fg" id="dRing" cx="31" cy="31" r="26" stroke-dasharray="163.4" stroke-dashoffset="163.4"/><text class="pct" id="dPct" x="31" y="35" text-anchor="middle">0%</text></svg></div>
+          <div class="pstat" id="dStat">就绪。预览与导出共用 <b>render(ctx,t)</b>。<br>WebCodecs 需 <b>https / localhost</b> 环境。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- API -->
+  <section class="rv">
+    <div class="sec-h"><span class="sec-no">00:03</span><h2>API 参考</h2></div>
+    <p class="sec-sub">// exportVideo(options) → Promise&lt;{ blob, filename, used, duration, frames }&gt;</p>
+    <table>
+      <thead><tr><th>选项</th><th>类型</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>render</code><span class="req">必填</span></td><td><k>(ctx, t, frame, frames) =&gt; void</k></td><td>每帧回调。<code>t</code>=当前秒（WC 下精确等于 frame/fps）。<b>请画满整个画布</b>，并只依赖 ctx 与 t，便于预览/导出复用。</td></tr>
+        <tr><td><code>width / height</code><span class="req">必填</span></td><td><k>number</k></td><td>输出像素，库自动对齐到偶数（H.264 硬性要求）。</td></tr>
+        <tr><td><code>fps</code><span class="req">必填</span></td><td><k>number</k></td><td>帧率，常用 24 / 30 / 60。</td></tr>
+        <tr><td><code>duration</code><span class="req">必填</span></td><td><k>number</k></td><td>总时长（秒）。总帧数 = ⌈duration·fps⌉。</td></tr>
+        <tr><td><code>mode</code></td><td><k>'auto'</k></td><td><span class="def">默认 'auto'</span>。先 WebCodecs，失败回退 MediaRecorder。可强制 <code>'webcodecs'</code> / <code>'mediarecorder'</code>。</td></tr>
+        <tr><td><code>bitrate</code></td><td><k>number</k></td><td><span class="def">默认按像素自动算</span>（2–24 Mbps 钳制）。越大越清晰越大文件。</td></tr>
+        <tr><td><code>filename</code></td><td><k>string</k></td><td><span class="def">默认 'video-export'</span>。扩展名按引擎自动加 .mp4 / .webm。</td></tr>
+        <tr><td><code>download</code></td><td><k>boolean</k></td><td><span class="def">默认 true</span>。设 false 则只返回 blob，自行处理。</td></tr>
+        <tr><td><code>onProgress</code></td><td><k>(p, info) =&gt; void</k></td><td><code>p</code>∈[0,1]；<code>info</code> 含 <code>frame/frames/t/used</code>，用来画进度条。</td></tr>
+        <tr><td><code>signal</code></td><td><k>AbortSignal</k></td><td>传入即可随时 <code>abort()</code> 取消，抛 <code>AbortError</code>。</td></tr>
+        <tr><td><code>alpha</code></td><td><k>boolean</k></td><td><span class="def">默认 false</span>。H.264 不含透明；要透明背景用 webm+vp9 时再开。</td></tr>
+        <tr><td><code>gop / codec / yieldEvery / onLog / muxerUrls</code></td><td><k>…</k></td><td>高级项：关键帧间隔 / 强制 H.264 codec 串 / 让出主线程频率 / 日志回调 / 自定义 muxer CDN。</td></tr>
+      </tbody>
+    </table>
+    <p class="sec-sub" style="margin-top:18px">// 另导出工具函数：<code>VEX.loadMp4Muxer()</code> · <code>VEX.isWebCodecsSupported()</code> · <code>VEX.pickRecorderMime()</code> · <code>VEX.defaultBitrate(w,h,fps)</code></p>
+  </section>
+
+  <!-- 踩坑 -->
+  <section class="rv">
+    <div class="sec-h"><span class="sec-no">00:04</span><h2>踩坑清单 · 库已替你兜住的 &amp; 你要知道的</h2></div>
+    <div class="grid">
+      <div class="card am"><div class="ic">▸ 偶数宽高</div><p>H.264 要求宽高为偶数，否则编码直接报错。库内部 <code>even()</code> 自动对齐，你传 1081 也能跑。</p></div>
+      <div class="card ro"><div class="ic">▸ 跨域图污染</div><p>render 里 <code>drawImage</code> 跨域且无 CORS 头的图会<b>污染 canvas</b>，导致黑帧/SecurityError。请用同源图或带 <code>crossOrigin='anonymous'</code> 且服务端允许 CORS 的图。库对单帧 try/catch，但污染是 canvas 级的——源头要干净。</p></div>
+      <div class="card te"><div class="ic">▸ 需安全上下文</div><p>WebCodecs 仅在 <b>https 或 localhost</b> 可用。file:// 双击打开通常没有 → auto 模式会自动回退 MediaRecorder（仍可能受限）。部署到任意静态托管即可满血。</p></div>
+      <div class="card vi"><div class="ic">▸ 时长精确性</div><p>WebCodecs 逐帧离线，时长<b>严格</b> = 帧数/fps，渲染再慢也不丢帧。MediaRecorder 是实时墙钟录制，渲染卡顿会让成片偏短——这是兜底，能跑就行。</p></div>
+      <div class="card"><div class="ic">▸ render 要画满</div><p>库不会替你清屏/填底（避免覆盖透明意图）。<code>alpha:false</code> 时未画区域是黑边。请在 render 第一行 <code>fillRect</code> 铺满背景。</p></div>
+      <div class="card am"><div class="ic">▸ 一帧炸 ≠ 全片炸</div><p>render 或 encode 单帧抛错只跳过该帧并写 <code>onLog</code>，循环继续。不会因一帧异常中断整段导出。</p></div>
+      <div class="card te"><div class="ic">▸ 让出主线程</div><p>WC 循环每 <code>yieldEvery</code> 帧 <code>setTimeout(0)</code>，否则进度回调不刷新、页面假死。默认 3，别设太大。</p></div>
+      <div class="card ro"><div class="ic">▸ Safari / 老浏览器</div><p>Safari 的 VideoEncoder 支持较晚；不支持时 auto 自动走 MediaRecorder。用 <code>VEX.isWebCodecsSupported()</code> 提前判断做 UI 提示。</p></div>
+    </div>
+  </section>
+
+  <!-- 接入方式 -->
+  <section class="rv">
+    <div class="sec-h"><span class="sec-no">00:05</span><h2>三种接入方式</h2></div>
+    <div class="grid">
+      <div class="card"><div class="ic">&lt;script&gt;</div><p>把库存成 <code>video-exporter.js</code>，<code>&lt;script src="video-exporter.js"&gt;</code> 后用全局 <code>exportVideo</code> / <code>VEX</code>。零构建，最省心。</p></div>
+      <div class="card"><div class="ic">ESM / import</div><p>UMD 头已兼容打包器：<code>import { exportVideo } from './video-exporter.js'</code>（或 <code>require</code>）。</p></div>
+      <div class="card"><div class="ic">内联</div><p>单文件项目可直接把库源码贴进 <code>&lt;script&gt;</code>。本页「复制 video-exporter.js」拿到的就是干净源码。</p></div>
+    </div>
+    <div class="codewrap" style="margin-top:18px">
+      <div class="codebar"><span>库完整源码</span><span class="nm">video-exporter.js</span><span class="sz" id="libSz"></span><button class="copybtn" data-copy="lib">复制 video-exporter.js</button></div>
+<pre><code id="libView"></code></pre>
+    </div>
+  </section>
+
+  <div class="foot">video-exporter.js · 从「竖屏动态海报片场」剥离的导出内核 · 与业务零耦合 · <a href="#" id="toTop">↑ 回顶</a></div>
+
+</div>
+
+<script>
+/* ===== 非阻塞字体 ===== */
+['https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap',
+ 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap']
+.forEach(function(u){var l=document.createElement('link');l.rel='stylesheet';l.media='print';l.href=u;
+  l.onload=function(){l.media='all';};l.onerror=function(){};document.head.appendChild(l);});
+
+/* ===== 单一数据源：取出库源码，既执行又展示 ===== */
+var LIB_SRC = document.getElementById('lib-src').textContent;
+// 执行库（IIFE 自挂 globalThis → window.exportVideo / window.VEX）
+(new Function(LIB_SRC))();
+
+/* ===== 极简 JS 高亮（先 tokenize 再转义，避免嵌套误判） ===== */
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function highlight(src){
+  var re=/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(`(?:\\.|[^`\\])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|this|class|extends|async|await|try|catch|finally|throw|typeof|instanceof|in|of|true|false|null|undefined|void|delete|yield|import|export|from|default|prototype)\b|\b(\d+\.?\d*(?:e[+-]?\d+)?)\b|([A-Za-z_$][\w$]*)(?=\s*\()/g;
+  var out='',last=0,m;
+  while((m=re.exec(src))){
+    out+=esc(src.slice(last,m.index));last=re.lastIndex;
+    if(m[1])out+='<span class="tok-com">'+esc(m[1])+'</span>';
+    else if(m[2])out+='<span class="tok-str">'+esc(m[2])+'</span>';
+    else if(m[3])out+='<span class="tok-key">'+esc(m[3])+'</span>';
+    else if(m[4])out+='<span class="tok-num">'+esc(m[4])+'</span>';
+    else if(m[5])out+='<span class="tok-fn">'+esc(m[5])+'</span>';
+  }
+  out+=esc(src.slice(last));
+  // 行号
+  return out.split('\n').map(function(l){return '<span class="ln">'+(l||' ')+'</span>';}).join('\n');
+}
+function showCode(elId, src){document.getElementById(elId).innerHTML=highlight(src);}
+
+/* quickstart 示例（讲解向，逻辑与库一致） */
+var QS =
+"import { exportVideo } from './video-exporter.js';\n\n" +
+"// 你的动画：只依赖 ctx 与 t（秒），预览和导出可共用同一函数\n" +
+"function render(ctx, t) {\n" +
+"  const W = ctx.canvas.width, H = ctx.canvas.height;\n" +
+"  ctx.fillStyle = '#0e1014'; ctx.fillRect(0, 0, W, H);   // 画满，避免黑边\n" +
+"  ctx.fillStyle = '#f4b740';\n" +
+"  ctx.beginPath();\n" +
+"  ctx.arc(W/2, H/2, 60 + 20*Math.sin(t*3), 0, Math.PI*2);\n" +
+"  ctx.fill();\n" +
+"  ctx.fillStyle = '#fff'; ctx.font = '700 28px monospace';\n" +
+"  ctx.fillText(t.toFixed(2) + 's', 24, 40);\n" +
+"}\n\n" +
+"const ctrl = new AbortController();           // 想取消就 ctrl.abort()\n" +
+"const res = await exportVideo({\n" +
+"  width: 1080, height: 1920, fps: 30, duration: 4,\n" +
+"  render,\n" +
+"  onProgress: (p) => console.log((p*100)|0 + '%'),\n" +
+"  signal: ctrl.signal,\n" +
+"});\n" +
+"// res = { blob, filename:'video-export.mp4', used:'webcodecs', duration, frames }\n" +
+"// download 默认 true，已自动触发下载；否则用 res.blob 自行处理。";
+
+showCode('qs', QS);
+showCode('libView', LIB_SRC);
+document.getElementById('libSz').textContent = (LIB_SRC.length/1024).toFixed(1) + ' KB';
+
+/* ===== 复制按钮 ===== */
+function copyText(t, btn){
+  var done=function(){var o=btn.textContent;btn.textContent='✓ 已复制';btn.classList.add('ok');
+    setTimeout(function(){btn.textContent=o;btn.classList.remove('ok');},1300);};
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,function(){fallback(t,done);});}
+  else fallback(t,done);
+}
+function fallback(t,done){var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);done();}
+document.querySelectorAll('.copybtn').forEach(function(b){
+  b.addEventListener('click',function(){
+    var k=b.getAttribute('data-copy');
+    copyText(k==='lib'?LIB_SRC:QS, b);
+  });
+});
+
+/* ===== 滚动揭示 ===== */
+var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:.12});
+document.querySelectorAll('.rv').forEach(function(el){io.observe(el);});
+
+/* ===== 顶栏时间码 ===== */
+var t0=performance.now();
+setInterval(function(){var s=(performance.now()-t0)/1000;var h=(s/3600)|0,m=((s%3600)/60)|0,ss=(s%60)|0;
+  document.getElementById('tc').textContent='REC '+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0');},500);
+
+/* ===== Live Demo：预览 + 导出共用 render ===== */
+function demoRender(ctx, t) {
+  var W = ctx.canvas.width, H = ctx.canvas.height;
+  // 背景：随 t 旋转的深色渐变
+  var hue = (t * 40) % 360;
+  var g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, 'hsl(' + hue + ',30%,9%)');
+  g.addColorStop(1, 'hsl(' + ((hue + 60) % 360) + ',34%,13%)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // 细网格
+  ctx.strokeStyle = 'rgba(255,255,255,.04)'; ctx.lineWidth = 1;
+  for (var x = 0; x < W; x += W/8) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (var y = 0; y < H; y += H/12) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  // 中心旋转胶片环
+  var cx = W/2, cy = H*0.46, R = Math.min(W,H)*0.22;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.8);
+  ctx.strokeStyle = '#f4b740'; ctx.lineWidth = Math.max(2, R*0.10);
+  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle = '#34d3c0';
+  for (var i = 0; i < 12; i++) { var a = i/12*Math.PI*2; ctx.beginPath();
+    ctx.arc(Math.cos(a)*R, Math.sin(a)*R, R*0.07, 0, Math.PI*2); ctx.fill(); }
+  ctx.restore();
+  // 漂浮圆点
+  ctx.fillStyle = 'rgba(255,107,129,.7)';
+  for (var k = 0; k < 5; k++) { var ph = k*1.3;
+    ctx.beginPath(); ctx.arc(W*(0.2+0.15*k) + Math.sin(t+ph)*12, H*0.74 + Math.cos(t*0.7+ph)*16, 4+k, 0, Math.PI*2); ctx.fill(); }
+  // 时间码 + 帧感文字
+  ctx.fillStyle = '#e9e6dd'; ctx.textAlign = 'left';
+  ctx.font = '700 ' + Math.round(W*0.085) + 'px "JetBrains Mono",monospace';
+  ctx.fillText(t.toFixed(2) + 's', W*0.08, H*0.12);
+  ctx.fillStyle = 'rgba(233,230,221,.5)'; ctx.font = '500 ' + Math.round(W*0.045) + 'px "JetBrains Mono",monospace';
+  ctx.fillText('video-exporter.js', W*0.08, H*0.92);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#f4b740';
+  ctx.font = '700 ' + Math.round(W*0.06) + 'px "Space Grotesk",sans-serif';
+  ctx.fillText('CANVAS → MP4', cx, H*0.70);
+  ctx.textAlign = 'left';
+}
+// 实时预览循环
+var prev = document.getElementById('prev'), pctx = prev.getContext('2d');
+var DUR_PREVIEW = 3;
+(function previewLoop(){ var t = ((performance.now()/1000) % DUR_PREVIEW); demoRender(pctx, t);
+  document.getElementById('prevCap').textContent = 'PREVIEW · t=' + t.toFixed(2) + 's';
+  requestAnimationFrame(previewLoop); })();
+
+// 导出接线
+var dRing = document.getElementById('dRing'), dPct = document.getElementById('dPct'), dStat = document.getElementById('dStat');
+var RING_C = 163.4, curCtrl = null;
+function setProg(p){ dRing.style.strokeDashoffset = RING_C*(1-p); dPct.textContent = Math.round(p*100)+'%'; }
+document.getElementById('dGo').addEventListener('click', async function(){
+  var go = this, can = document.getElementById('dCancel');
+  var res = document.getElementById('dRes').value.split(','), W = +res[0], H = +res[1];
+  var fps = +document.getElementById('dFps').value, dur = +document.getElementById('dDur').value, mode = document.getElementById('dMode').value;
+  go.disabled = true; can.disabled = false; setProg(0);
+  dStat.innerHTML = '编码中… 引擎协商中';
+  curCtrl = new AbortController();
+  try {
+    var r = await exportVideo({
+      width: W, height: H, fps: fps, duration: dur, mode: mode,
+      render: demoRender, signal: curCtrl.signal,
+      onProgress: function(p, info){ setProg(p);
+        dStat.innerHTML = '编码中… <b>' + (info.used||'?') + '</b> · 帧 ' + (info.frame!=null?info.frame:'-') + '/' + (info.frames||'?') + ' · t=' + (info.t||0).toFixed(2) + 's'; }
+    });
+    setProg(1);
+    dStat.innerHTML = '✓ 完成 · 已下载 <b>' + r.filename + '</b><br>引擎 <b>' + r.used + '</b> · ' + r.width + '×' + r.height + ' · ' + r.frames + ' 帧 · ' + r.duration + 's';
+  } catch (e) {
+    if (e.name === 'AbortError') dStat.innerHTML = '<span class="err">已取消</span>';
+    else dStat.innerHTML = '<span class="err">导出失败：' + esc(e.message) + '</span>';
+    setProg(0);
+  }
+  go.disabled = false; can.disabled = true; curCtrl = null;
+});
+document.getElementById('dCancel').addEventListener('click', function(){ if (curCtrl) curCtrl.abort(); });
+
+document.getElementById('toTop').addEventListener('click', function(e){ e.preventDefault(); window.scrollTo({top:0,behavior:'smooth'}); });
+</script>
+</body>
+</html>
